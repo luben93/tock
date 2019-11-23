@@ -1,6 +1,7 @@
 //! Tock Binary Format Header definitions and parsing code.
 
 use core::{mem, slice, str};
+use core::convert::TryInto;
 
 /// Takes a value and rounds it up to be aligned % 4
 macro_rules! align4 {
@@ -10,7 +11,6 @@ macro_rules! align4 {
 }
 
 /// TBF fields that must be present in all v2 headers.
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 crate struct TbfHeaderV2Base {
     version: u16,
@@ -20,8 +20,57 @@ crate struct TbfHeaderV2Base {
     checksum: u32,
 }
 
+pub struct TbfParseError;
+
+impl From<core::array::TryFromSliceError> for TbfParseError {
+    fn from(error: core::array::TryFromSliceError) -> Self {
+        TbfParseError
+    }
+}
+
+impl From<core::convert::Infallible> for TbfParseError {
+    fn from(error: core::convert::Infallible) -> Self {
+        TbfParseError
+    }
+}
+
+impl From<core::option::NoneError> for TbfParseError {
+    fn from(error: core::option::NoneError) -> Self {
+        TbfParseError
+    }
+}
+
+
+impl core::convert::TryFrom<&mut [u8]> for TbfHeaderV2Base {
+    type Error = TbfParseError;
+
+    fn try_from(b: &mut [u8]) -> Result<TbfHeaderV2Base, Self::Error> {
+        Ok(TbfHeaderV2Base {
+            version: u16::from_le_bytes(b.get(0..1)?.try_into()?),
+            header_size: u16::from_le_bytes(b.get(2..3)?.try_into()?),
+            total_size: u32::from_le_bytes(b.get(4..7)?.try_into()?),
+            flags: u32::from_le_bytes(b.get(8..11)?.try_into()?),
+            checksum: u32::from_le_bytes(b.get(12..15)?.try_into()?),
+        })
+    }
+
+    // type Error = ();
+    // fn try_from(b: &mut [u8]) -> Result<TbfHeaderV2Base, Self::Error> {
+    //     if b.len() >= 16 {
+    //         Ok(TbfHeaderV2Base {
+    //             version: u16::from_be_bytes([b[0], b[1]]),
+    //             header_size: u16::from_be_bytes([b[2], b[3]]),
+    //             total_size: u32::from_be_bytes([b[4], b[5], b[6], b[7]]),
+    //             flags: u32::from_be_bytes([b[8], b[9], b[10], b[11]]),
+    //             checksum: u32::from_be_bytes([b[12], b[13], b[14], b[15]]),
+    //         })
+    //     } else {
+    //         Err(())
+    //     }
+    // }
+}
+
 /// Types in TLV structures for each optional block of the header.
-#[repr(u16)]
 #[derive(Clone, Copy, Debug)]
 #[allow(dead_code)]
 crate enum TbfHeaderTypes {
@@ -31,19 +80,41 @@ crate enum TbfHeaderTypes {
     Unused = 5,
 }
 
+impl core::convert::TryFrom<u16> for TbfHeaderTypes {
+    type Error = TbfParseError;
+
+    fn try_from(h: u16) -> Result<TbfHeaderTypes, Self::Error> {
+        match h {
+            1 => Ok(TbfHeaderTypes::TbfHeaderMain),
+            2 => Ok(TbfHeaderTypes::TbfHeaderWriteableFlashRegions),
+            3 => Ok(TbfHeaderTypes::TbfHeaderPackageName),
+            _ => Err(TbfParseError)
+        }
+    }
+}
+
 /// The TLV header (T and L).
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 crate struct TbfHeaderTlv {
     tipe: TbfHeaderTypes,
     length: u16,
 }
 
+impl core::convert::TryFrom<&mut [u8]> for TbfHeaderTlv {
+    type Error = TbfParseError;
+
+    fn try_from(b: &mut [u8]) -> Result<TbfHeaderTlv, Self::Error> {
+        Ok(TbfHeaderTlv {
+            tipe: u16::from_le_bytes(b.get(0..1)?.try_into()?).try_into()?,
+            length: u16::from_le_bytes(b.get(2..3)?.try_into()?),
+        })
+    }
+}
+
 /// The v2 main section for apps.
 ///
 /// All apps must have a main section. Without it, the header is considered as
 /// only padding.
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 crate struct TbfHeaderV2Main {
     init_fn_offset: u32,
@@ -51,15 +122,37 @@ crate struct TbfHeaderV2Main {
     minimum_ram_size: u32,
 }
 
+impl core::convert::TryFrom<&mut [u8]> for TbfHeaderV2Main {
+    type Error = TbfParseError;
+
+    fn try_from(b: &mut [u8]) -> Result<TbfHeaderV2Main, Self::Error> {
+        Ok(TbfHeaderV2Main {
+            init_fn_offset: u32::from_le_bytes(b.get(0..3)?.try_into()?),
+            protected_size: u32::from_le_bytes(b.get(4..7)?.try_into()?),
+            minimum_ram_size: u32::from_le_bytes(b.get(8..11)?.try_into()?),
+        })
+    }
+}
+
 /// Writeable flash regions only need an offset and size.
 ///
 /// There can be multiple (or zero) flash regions defined, so this is its own
 /// struct.
-#[repr(C)]
 #[derive(Clone, Copy, Debug)]
 crate struct TbfHeaderV2WriteableFlashRegion {
     writeable_flash_region_offset: u32,
     writeable_flash_region_size: u32,
+}
+
+impl core::convert::TryFrom<&mut [u8]> for TbfHeaderV2WriteableFlashRegion {
+    type Error = TbfParseError;
+
+    fn try_from(b: &mut [u8]) -> Result<TbfHeaderV2WriteableFlashRegion, Self::Error> {
+        Ok(TbfHeaderV2WriteableFlashRegion {
+            writeable_flash_region_offset: u32::from_le_bytes(b.get(0..3)?.try_into()?),
+            writeable_flash_region_size: u32::from_le_bytes(b.get(4..7)?.try_into()?),
+        })
+    }
 }
 
 /// Single header that can contain all parts of a v2 header.
@@ -178,8 +271,150 @@ impl TbfHeader {
     }
 }
 
-crate fn parse_tbf_header_lengths(start: &'static mut [u8]) -> Option<(u32, u32)> {
+/// Parse the TBF header length and the entire length of the TBF binary.
+///
+/// ## Return
+///
+/// Some((Version, TBF header length, entire TBF length))
+crate fn parse_tbf_header_lengths(app: &'static mut [u8; 8]) -> Result<(u16, u16, u32), TbfParseError> {
+    // Version is the first 16 bits of the app TBF contents. We need this to
+    // correctly parse the other lengths.
+    //
+    // ## Safety
+    // We trust that the version number has been checked prior to running this
+    // parsing code. That is, whatever loaded this application has verified that
+    // the version is valid and therefore we can trust it.
+    let version = u16::from_le_bytes(app.get(0..1).ok_or(TbfParseError)?.try_into()?);
 
+    match version {
+        2 => {
+            // In version 2, the next 16 bits after the version represent
+            // the size of the TBF header in bytes.
+            let tbf_header_size = u16::from_le_bytes(app.get(2..3).ok_or(TbfParseError)?.try_into()?);
+
+            // The next 4 bytes are the size of the entire app's TBF space
+            // including the header. This also must be checked before parsing
+            // this header and we trust the value in flash.
+            let tbf_size = u32::from_le_bytes(app.get(4..7).ok_or(TbfParseError)?.try_into()?);
+
+            // Check that the header length isn't greater than the entire
+            // app. If that at least looks good then return the sizes.
+            if u32::from(tbf_header_size) > tbf_size {
+                Err(TbfParseError)
+            } else {
+                Ok((version, tbf_header_size, tbf_size))
+            }
+        }
+
+        _ => Err(TbfParseError)
+    }
+}
+
+crate fn parse_tbf_header(header: &'static mut [u8], version: u16) -> Result<TbfHeader, TbfParseError> {
+    match version {
+        2 => {
+            let tbf_header_base: TbfHeaderV2Base = header.try_into()?;
+
+            // Calculate checksum. The checksum is the XOR of each 4 byte word
+            // in the header.
+            let mut checksum: u32 = 0;
+
+            // let header_size: usize = tbf_header_base.header_size.try_into()?;
+
+            // Get an iterator across 4 byte fields in the header.
+            let header_iter = header.chunks_exact(4);
+
+            // Iterate all chunks and XOR the chunks to compute the checksum.
+            for (i, chunk) in header_iter.enumerate() {
+                let word = u32::from_le_bytes(chunk.try_into()?);
+                if i == 3 {
+                    // Skip the checksum field.
+                } else {
+                    checksum ^= word;
+                }
+            }
+
+            // DO WE NEED TO PARSE THE REMAINDER (AKA DO APPS HAVE HEADERS
+            // NOT MULTIPLE OF 4)
+            // let extra = header_iter.remainder();
+
+
+            if checksum != tbf_header_base.checksum {
+                return Err(TbfParseError);
+            }
+
+
+
+
+
+
+            // let mut num_chunks = tbf_header_base.header_size as usize / 4;
+            // let leftover_bytes = tbf_header_base.header_size as usize % 4;
+            // if leftover_bytes != 0 {
+            //     num_chunks += 1;
+            // }
+
+
+            // for (i, chunk) in app.chunks(4).take(num_chunks).enumerate() {
+            //     let word =
+            //     if i == 3 {
+            //         // Skip the checksum field.
+            //     } else if i == num_chunks - 1 && leftover_bytes != 0 {
+            //         // In this case, we don't want to use the entire word.
+            //         checksum ^= *chunk & (0xFFFFFFFF >> (4 - leftover_bytes));
+            //     } else {
+            //         checksum ^= *chunk;
+            //     }
+            // }
+
+
+
+
+
+            // let mut chunks = tbf_header_base.header_size as usize / 4;
+            // let leftover_bytes = tbf_header_base.header_size as usize % 4;
+            // if leftover_bytes != 0 {
+            //     chunks += 1;
+            // }
+            // let mut checksum: u32 = 0;
+            // let header = unsafe { slice::from_raw_parts(address as *const u32, chunks) };
+            // for (i, chunk) in header.iter().enumerate() {
+            //     if i == 3 {
+            //         // Skip the checksum field.
+            //     } else if i == chunks - 1 && leftover_bytes != 0 {
+            //         // In this case, we don't want to use the entire word.
+            //         checksum ^= *chunk & (0xFFFFFFFF >> (4 - leftover_bytes));
+            //     } else {
+            //         checksum ^= *chunk;
+            //     }
+            // }
+
+            // if checksum != tbf_header_base.checksum {
+            //     return None;
+            // }
+
+
+            // Get the rest of the header
+            let remaining = header.get(16..)?;
+
+            // If there is nothing left in the header then this is just a
+            // padding "app" between two other apps.
+            if remaining.len() == 0 {
+                // Just padding.
+                Ok(TbfHeader::Padding(&tbf_header_base))
+            } else {
+
+
+
+
+
+
+
+                Err(TbfParseError)
+            }
+        }
+        _ => Err(TbfParseError)
+    }
 }
 
 #[allow(clippy::cast_ptr_alignment)]
