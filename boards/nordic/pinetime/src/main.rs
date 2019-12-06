@@ -70,14 +70,14 @@ use kernel::{debug, debug_gpio, debug_verbose, static_init};
 use nrf52dk_base::{SpiPins, UartPins};
 
 // The nRF52 DK LEDs (see back of board)
-const LED1_PIN: usize = 17;
-const LED2_PIN: usize = 18;
-const LED3_PIN: usize = 19;
-const LED4_PIN: usize = 20;
+const LED1_PIN: usize = 14;
+const LED2_PIN: usize = 22;
+const LED3_PIN: usize = 23;
+const LED4_PIN: usize = 27;
 
 // The nRF52 DK buttons (see back of board)
 const BUTTON1_PIN: usize = 13;
-const BUTTON2_PIN: usize = 14;
+const BUTTON2_PIN: usize = 15;
 const BUTTON3_PIN: usize = 15;
 const BUTTON4_PIN: usize = 16;
 const BUTTON_RST_PIN: usize = 21;
@@ -87,9 +87,9 @@ const UART_TXD: usize = 6;
 const UART_CTS: usize = 7;
 const UART_RXD: usize = 8;
 
-const SPI_MOSI: usize = 22;
-const SPI_MISO: usize = 23;
-const SPI_CLK: usize = 24;
+const SPI_MOSI: usize = 3;
+const SPI_MISO: usize = 4;
+const SPI_CLK: usize = 2;
 
 /// UART Writer
 #[macro_use]
@@ -266,7 +266,7 @@ pub unsafe fn reset_handler() {
 
     nrf52dk_base::setup_board(
         board_kernel,
-        BUTTON_RST_PIN,
+        BUTTON1_PIN,
         gpio_pins,
         LED1_PIN,
         LED2_PIN,
